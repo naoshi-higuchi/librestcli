@@ -1,0 +1,34 @@
+{
+  "openapi": "3.0",
+  "info": {
+    "title": "API",
+    "description": "API",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local server"
+    }
+  ],
+  "paths": {
+    "/foo": {
+      "get": {
+        "summary": "Get foo",
+        "description": "Get foo",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Foo"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
