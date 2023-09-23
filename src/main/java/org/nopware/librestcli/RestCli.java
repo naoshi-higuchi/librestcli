@@ -71,7 +71,7 @@ public class RestCli {
         }
     }
 
-    public record RestCliSpec(@NonNull CommandSpec commandSpec, @NonNull OpenAPI openAPI) {
+    public record RestCliSpec(@NonNull CommandSpec commandSpec, @NonNull OpenAPI openAPI) { // TODO: Hide constructor and fields.
     }
 
     private final CommandLine commandLine;
@@ -116,9 +116,9 @@ public class RestCli {
     /**
      * Execute the command.
      *
-     * @param restCliSpec  {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String)}.
+     * @param restCliSpec   {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String)}.
      * @param authorization Authorization object.
-     * @param args        Command line arguments.
+     * @param args          Command line arguments.
      * @return Exit code.
      */
     public static int execute(RestCliSpec restCliSpec, Authorization authorization, String... args) {
@@ -131,7 +131,7 @@ public class RestCli {
      * It is same as {@link #execute(RestCliSpec, Authorization, String...)} with {@link RestCli.Authorization.None}.
      *
      * @param restCliSpec {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String)}.
-     * @param args       Command line arguments.
+     * @param args        Command line arguments.
      * @return Exit code.
      */
     public static int execute(RestCliSpec restCliSpec, String... args) {
@@ -140,7 +140,7 @@ public class RestCli {
 
     private int doExecute(CommandLine.ParseResult parseResult) {
         /*
-         * If the help option is specified, the help message is printed and the program exits.
+         * If `--help` option is specified, print the help message and exit.
          * The exit code is 0.
          */
         Integer helpExitCode = CommandLine.executeHelpRequest(parseResult);
@@ -149,7 +149,7 @@ public class RestCli {
         }
 
         /*
-         * If the generate bash auto-completion script option is specified, generate the script and the program exits.
+         * If `--generate-bash-auto-completion-script` option is specified, generate the script and exit.
          * The exit code is 0.
          */
         if (parseResult.hasMatchedOption(generateBashAutoCompletionScriptOption)) {
@@ -196,45 +196,45 @@ public class RestCli {
     }
 
     private int doRestRequest(CommandLine.ParseResult topCommand, CommandLine.ParseResult pathCommand, CommandLine.ParseResult methodCommand) {
-        HttpClient httpClient = HttpClient.newBuilder()
+        HttpClient.Builder httpClientBuilder = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_2) // Each request will attempt to upgrade to HTTP/2. If the upgrade fails, then the response will be handled using HTTP/1.1
-                .proxy(ProxySelector.getDefault()) // Use the system-wide proxy settings.
-                .build();
+                .proxy(ProxySelector.getDefault()); // Use the system-wide proxy settings.
 
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(createUri(pathCommand, methodCommand))
-                .method(
-                        methodCommand.commandSpec().name().toUpperCase(), // Do not forget to convert to upper case. It is a pitfall about OpenAPI spec.
-                        HttpRequest.BodyPublishers.noBody()); // TODO: Support request body.
+        try (HttpClient httpClient = httpClientBuilder.build()) {
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
+                    .uri(createUri(pathCommand, methodCommand))
+                    .method(
+                            methodCommand.commandSpec().name().toUpperCase(), // Do not forget to convert to upper case. It is a pitfall about OpenAPI spec.
+                            HttpRequest.BodyPublishers.noBody()); // TODO: Support request body.
 
-        Multimap<String, String> resolvedHeaders = resolveHeaderParameters(pathCommand.commandSpec().name(), methodCommand.commandSpec().name(), methodCommand);
-        resolvedHeaders.forEach(requestBuilder::header);
+            Multimap<String, String> resolvedHeaders = resolveHeaderParameters(pathCommand.commandSpec().name(), methodCommand.commandSpec().name(), methodCommand);
+            resolvedHeaders.forEach(requestBuilder::header);
 
-        switch (authorization) {
-            case Authorization.AuthorizationHeader authorizationHeader ->
-                    requestBuilder.header("Authorization", authorizationHeader.authorizationHeader());
-            default -> {
+            switch (authorization) {
+                case Authorization.AuthorizationHeader authorizationHeader -> requestBuilder.header("Authorization", authorizationHeader.authorizationHeader());
+                default -> {
+                }
             }
-        }
 
-        HttpRequest httpRequest = requestBuilder.header("User-Agent", "AweSome-App")
-                .header("Accept", "application/vnd.github+json")
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .build();
+            HttpRequest httpRequest = requestBuilder.header("User-Agent", "AweSome-App")
+                    .header("Accept", "application/vnd.github+json")
+                    .header("X-GitHub-Api-Version", "2022-11-28")
+                    .build();
 
-        log.info("Request: {}", httpRequest.toString());
-        log.info("URL: {}", httpRequest.uri());
-        log.info("Method: {}", httpRequest.method());
-        log.info("Headers: {}", httpRequest.headers().map().toString());
+            log.info("Request: {}", httpRequest.toString());
+            log.info("URL: {}", httpRequest.uri());
+            log.info("Method: {}", httpRequest.method());
+            log.info("Headers: {}", httpRequest.headers().map().toString());
 
-        try {
-            HttpResponse<String> send = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-            log.info("Response code: {}", send.statusCode());
-            log.info("ResponseHeaders: {}", send.headers().map().toString());
-            System.out.println(send.body());
-        } catch (IOException | InterruptedException e) {
-            System.err.println(e.getMessage());
-            return -1;
+            try {
+                HttpResponse<String> send = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString()); // TODO: Support response body other than String.
+                log.info("Response code: {}", send.statusCode());
+                log.info("ResponseHeaders: {}", send.headers().map().toString());
+                System.out.println(send.body());
+            } catch (IOException | InterruptedException e) {
+                System.err.println(e.getMessage());
+                return -1;
+            }
         }
 
         return 0;
@@ -398,6 +398,7 @@ public class RestCli {
 
     /**
      * Load librestcli.properties that is generated by Maven from pom.xml.
+     *
      * @return
      */
     private static Properties loadProperties() {
@@ -477,9 +478,8 @@ public class RestCli {
     }
 
     /**
-     *
-     * @param method It is one of get, head, post, put, delete, options, trace, patch.
-     * @param pathItem PathItem object of OpenAPI.
+     * @param method    It is one of get, head, post, put, delete, options, trace, patch.
+     * @param pathItem  PathItem object of OpenAPI.
      * @param operation Operation object of OpenAPI.
      * @return CommandSpec object for the method sub-sub-command of picocli.
      */
