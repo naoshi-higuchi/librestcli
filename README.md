@@ -1,2 +1,4 @@
 # librestcli
-Library for REST API CLI client.
+Library for developing REST API CLI client.
+
+It is under construction :-)

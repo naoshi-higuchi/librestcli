@@ -2,10 +2,10 @@ package org.nopware.librestcli;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.LinkedListMultimap;
+import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
 import com.google.common.io.CharSource;
 import com.google.common.io.Resources;
-import com.google.common.collect.Multimap;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -15,7 +15,10 @@ import io.swagger.v3.oas.models.servers.Server;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.client.utils.URIBuilder;
+import org.nopware.librestcli.RestCli.Authorization.None;
 import picocli.AutoComplete;
 import picocli.CommandLine;
 import picocli.CommandLine.Model.CommandSpec;
@@ -25,6 +28,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.net.ProxySelector;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -41,20 +45,52 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class RestCli {
+    /**
+     * It is just a marker interface for Authorization classes.
+     */
+    public sealed interface Authorization permits None, Authorization.AuthorizationHeader, Authorization.UsernameAndPasswordInUriAuthority {
+        /**
+         * No authorization.
+         */
+        public record None() implements Authorization {
+        }
+
+        ;
+
+        /**
+         * Authorization header in HTTP request header.
+         */
+        public record AuthorizationHeader(@NonNull String authorizationHeader) implements Authorization {
+        }
+
+        /**
+         * Username and password in URI authority.
+         * <p>
+         * example: <pre>{@literal https://username:password@host/path}</pre>
+         */
+        public record UsernameAndPasswordInUriAuthority(@NonNull String username,
+                                                        @NonNull String password) implements Authorization {
+        }
+    }
+
+    public record RestCliSpec(@NonNull CommandSpec commandSpec, @NonNull OpenAPI openAPI) {
+    }
+
     private final CommandLine commandLine;
     private final OpenAPI openAPI;
+    private final Authorization authorization;
     private static final OptionSpec generateBashAutoCompletionScriptOption = OptionSpec.builder("--generate-bash-auto-completion-script")
             .arity("0..1")
             .description("Generate Bash auto completion script and exit")
             .paramLabel("file")
             .type(String.class)
             .build();
-    ;
 
-    private RestCli(CommandSpec commandSpec, OpenAPI openAPI) {
-        this.commandLine = new CommandLine(commandSpec);
+    private RestCli(@NonNull RestCliSpec restCliSpec, @NonNull Authorization authorization) {
+        this.commandLine = new CommandLine(restCliSpec.commandSpec);
         this.commandLine.setExecutionStrategy(this::doExecute);
-        this.openAPI = openAPI;
+        this.openAPI = restCliSpec.openAPI;
+        this.authorization = authorization;
     }
 
     private int generateBashAutoCompletionScript(CommandLine.ParseResult parseResult) {
@@ -75,11 +111,20 @@ public class RestCli {
         return 0;
     }
 
-    public int execute(String... args) {
+    private int execute(String... args) {
         return this.commandLine.execute(args);
     }
 
-    public int doExecute(CommandLine.ParseResult parseResult) {
+    public static int execute(RestCliSpec restCliSpec, Authorization authorization, String... args) {
+        RestCli restCli = new RestCli(restCliSpec, authorization);
+        return restCli.execute(args);
+    }
+
+    public static int execute(RestCliSpec restCliSpec, String... args) {
+        return execute(restCliSpec, new None(), args);
+    }
+
+    private int doExecute(CommandLine.ParseResult parseResult) {
         /*
          * If the help option is specified, the help message is printed and the program exits.
          * The exit code is 0.
@@ -151,8 +196,14 @@ public class RestCli {
         Multimap<String, String> resolvedHeaders = resolveHeaderParameters(pathCommand.commandSpec().name(), methodCommand.commandSpec().name(), methodCommand);
         resolvedHeaders.forEach(requestBuilder::header);
 
-        HttpRequest httpRequest = requestBuilder.header("Authorization", "Bearer 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")
-                .header("User-Agent", "AweSome-App")
+        switch (authorization) {
+            case Authorization.AuthorizationHeader authorizationHeader ->
+                    requestBuilder.header("Authorization", authorizationHeader.authorizationHeader());
+            default -> {
+            }
+        }
+
+        HttpRequest httpRequest = requestBuilder.header("User-Agent", "AweSome-App")
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .build();
@@ -175,13 +226,20 @@ public class RestCli {
         return 0;
     }
 
+    /**
+     * Create URI from the path and method.
+     * <p>
+     * Insert userInfo to the URI if the authorization is {@link Authorization.UsernameAndPasswordInUriAuthority}.
+     *
+     * @param pathCommand
+     * @param methodCommand
+     * @return URI for the request.
+     */
     private URI createUri(CommandLine.ParseResult pathCommand, CommandLine.ParseResult methodCommand) {
         Optional<Server> first = openAPI.getServers().stream().findFirst();
         if (first.isEmpty()) {
             throw new RuntimeException("No server specified in OpenAPI spec.");
         }
-
-        String serverUrl = first.get().getUrl();
 
         String path = pathCommand.commandSpec().name();
         String resolvedPath = resolvePathParameters(path, methodCommand);
@@ -189,7 +247,16 @@ public class RestCli {
 
         String query = optionalQuery.map((value) -> String.format("?%s", value)).orElse("");
 
-        return URI.create(String.format("%s%s%s", serverUrl, resolvedPath, query));
+        try {
+            String serverUrl = first.get().getUrl() + resolvedPath + query;
+            URIBuilder uriBuilder = new URIBuilder(serverUrl);
+            if (authorization instanceof Authorization.UsernameAndPasswordInUriAuthority usernameAndPasswordInUriAuthority) {
+                uriBuilder.setUserInfo(usernameAndPasswordInUriAuthority.username(), usernameAndPasswordInUriAuthority.password());
+            }
+            return uriBuilder.build();
+        } catch (URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private String resolvePathParameters(String path, CommandLine.ParseResult methodCommand) {
@@ -253,16 +320,17 @@ public class RestCli {
         return Multimaps.unmodifiableMultimap(resolvedHeaders);
     }
 
-    public static RestCli parseOpenApi(String openApiYaml) {
-        long begin = System.currentTimeMillis();
+    private static OpenAPI parseOpenApi(String openApiJsonOrYaml) {
         ParseOptions parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
-        SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(openApiYaml, null, parseOptions);
-        long end = System.currentTimeMillis();
-        log.debug("parsing time: {}", end - begin);
-        log.debug(swaggerParseResult.getMessages().toString());
+        SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(openApiJsonOrYaml, null, parseOptions);
         OpenAPI openAPI = swaggerParseResult.getOpenAPI();
+        log.debug(swaggerParseResult.getMessages().toString());
 
+        return openAPI;
+    }
+
+    private static CommandSpec createCommandSpec(OpenAPI openAPI) {
         CommandSpec spec = CommandSpec.create();
         Properties properties = loadProperties();
 
@@ -285,7 +353,13 @@ public class RestCli {
             spec.addSubcommand(path, pathSpec);
         });
 
-        return new RestCli(spec, openAPI);
+        return spec;
+    }
+
+    public static RestCliSpec createRestCliSpec(String openApiJsonOrYaml) {
+        OpenAPI openApi = parseOpenApi(openApiJsonOrYaml);
+        CommandSpec commandSpec = createCommandSpec(openApi);
+        return new RestCliSpec(commandSpec, openApi);
     }
 
     private static Properties loadProperties() {
