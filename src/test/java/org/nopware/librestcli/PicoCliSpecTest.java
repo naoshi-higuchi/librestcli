@@ -49,10 +49,11 @@ public class PicoCliSpecTest {
      */
     @Test
     public void testOptionalOptionValue() {
-        OptionSpec optionWithOptionalValue = OptionSpec.builder("--option-with-optional-value")
+        OptionSpec optionWithOptionalValue = OptionSpec.builder("--option-with-default-value-and-allowed-zero-arity")
                 .arity("0..1")
-                .description("Option with optional value")
+                .description("Option with default value and allowd 0 arity.")
                 .paramLabel("value")
+                .required(false)
                 .type(String.class)
                 .build();
 
@@ -64,18 +65,22 @@ public class PicoCliSpecTest {
         CommandLine commandLine = new CommandLine(commandSpec);
         commandLine.setExecutionStrategy(parseResult -> {
             String optionValue = parseResult.matchedOptionValue(optionWithOptionalValue.longestName(),
-                    "This default value is not used even when the arity is 0. I don't know when this default value is used.");
+                    "This default value is not used even when the arity is 0. I is used only when the option is not specified.");
             optionalValueHolder.set(optionValue);
             return 0;
         });
 
         // Case: Arity is 0.
-        commandLine.execute("--option-with-optional-value");
+        commandLine.execute("--option-with-default-value-and-allowed-zero-arity");
         assertThat(optionalValueHolder.get()).isEqualTo(""); // It is not default value but empty string.
 
         // Case: Arity is 1.
-        commandLine.execute("--option-with-optional-value", "oneValue");
+        commandLine.execute("--option-with-default-value-and-allowed-zero-arity", "oneValue");
         assertThat(optionalValueHolder.get()).isEqualTo("oneValue");
+
+        // Case: The option is not specified.
+        commandLine.execute();
+        assertThat(optionalValueHolder.get()).isEqualTo("This default value is not used even when the arity is 0. I is used only when the option is not specified.");
     }
 
     /**
@@ -103,7 +108,7 @@ public class PicoCliSpecTest {
      * Let's test its immutability by checking the hash code of CommandLine before and after executing a command.
      * It is a very rough test, but it is enough for now.
      * <p>
-     * This test should be dependent only on picocli, but this test uses RestCli because constructing command-spec is too tedious other than by RestCli :-)
+     * This test should be dependent only on picocli, but this test uses RestCli because constructing very big command-spec is too tedious other than by RestCli :-)
      */
     @Test
     public void testIfCommandSpecIsImmutable() throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
