@@ -4,8 +4,6 @@ import com.google.common.base.Strings;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
-import com.google.common.io.CharSource;
-import com.google.common.io.Resources;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -30,11 +28,9 @@ import java.io.PrintWriter;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URL;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.Charset;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -274,26 +270,65 @@ public class RestCli {
     }
 
     public static class OptionAppender {
+        @FunctionalInterface
+        public interface Appender {
+            void accept(List<String> options);
+        }
         private final PathMatcher pathMatcher;
         private final Set<String> operations;
-        private final BiFunction<String, String, List<String>> optionMapper;
+        private final OptionAppender.Appender appender;
 
         /**
          * Create OptionAppender.
          *
          * @param pathMatcher  PathMatcher object.
          * @param operations   Set of operations. operation is one of get, head, post, put, delete, options, trace, patch.
-         * @param optionMapper Function to map path and operation to option strings. return-value example: ["--my-option=myValue", "-p", "8080"].
+         * @param appender     Append options to options.
          */
-        public OptionAppender(@NonNull PathMatcher pathMatcher, @NonNull Set<String> operations, @NonNull BiFunction<String, String, List<String>> optionMapper) {
+        public OptionAppender(@NonNull PathMatcher pathMatcher, @NonNull Set<String> operations, @NonNull OptionAppender.Appender appender) {
             this.pathMatcher = pathMatcher;
             this.operations = operations;
-            this.optionMapper = optionMapper;
+            this.appender = appender;
         }
 
         Optional<List<String>> getOptions(String path, String operation) {
+            List<String> options = new LinkedList<>();
             if (pathMatcher.matches(path) && operations.contains(operation)) {
-                return Optional.of(optionMapper.apply(path, operation));
+                appender.accept(options);
+                return Optional.of(options);
+            } else {
+                return Optional.empty();
+            }
+        }
+    }
+
+    public static class HeaderAppender {
+        @FunctionalInterface
+        public interface Appender {
+            void accept(Multimap<String, String> headers);
+        }
+        private final PathMatcher pathMatcher;
+        private final Set<String> operations;
+        private final Appender appender;
+
+        /**
+         * Create HeaderAppender.
+         *
+         * @param pathMatcher  PathMatcher object.
+         * @param operations   Set of operations. operation is one of get, head, post, put, delete, options, trace, patch.
+         * @param appender     Append header to headers.
+         */
+        public HeaderAppender(@NonNull PathMatcher pathMatcher, @NonNull Set<String> operations, @NonNull RestCli.HeaderAppender.Appender appender) {
+            this.pathMatcher = pathMatcher;
+            this.operations = operations;
+            this.appender = appender;
+        }
+
+        Optional<Multimap<String, String>> getHeaders(String path, String operation) {
+            Multimap<String, String> headers = LinkedListMultimap.create();
+            if (pathMatcher.matches(path) && operations.contains(operation)) {
+                appender.accept(headers);
+                return Optional.of(headers);
             } else {
                 return Optional.empty();
             }
@@ -456,7 +491,9 @@ public class RestCli {
                 }
             }
 
-            HttpRequest httpRequest = requestBuilder.header("User-Agent", "AweSome-App")
+            String userAgent = String.format("%s/%s", topCommand.commandSpec().name(), String.join(".", topCommand.commandSpec().version()));
+
+            HttpRequest httpRequest = requestBuilder.header("User-Agent", userAgent)
                     .header("Accept", "application/vnd.github+json")
                     .header("X-GitHub-Api-Version", "2022-11-28")
                     .build();

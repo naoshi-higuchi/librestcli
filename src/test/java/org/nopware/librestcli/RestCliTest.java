@@ -18,6 +18,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -185,7 +186,10 @@ public class RestCliTest {
         RestCli.OptionAppender optionAppender = new RestCli.OptionAppender(
                 RestCli.PathMatcher.glob("/foo/*/*/bar"),
                 Sets.newHashSet("put", "post", "delete"),
-                (path, operation) -> Lists.newArrayList("--X-API-KEY=secret", "--force"));
+                (options) -> {
+                    options.add("--X-API-KEY=secret");
+                    options.add("--force");
+                });
 
         Optional<List<String>> options = optionAppender.getOptions("/foo/one/two/bar", "put");
         assertThat(options.isPresent()).isTrue();
@@ -196,5 +200,19 @@ public class RestCliTest {
 
         Optional<List<String>> optionsOperationUnmatched = optionAppender.getOptions("/foo/one/two/bar", "get");
         assertThat(optionsOperationUnmatched.isPresent()).isFalse();
+    }
+
+    @Test
+    public void testOptionAppenderCanReturnEmptyList() {
+        RestCli.OptionAppender optionAppender = new RestCli.OptionAppender(
+                RestCli.PathMatcher.glob("/foo/*/*/bar"),
+                Sets.newHashSet("put", "post", "delete"),
+                (options) -> {
+                    // Do nothing.
+                });
+
+        Optional<List<String>> options = optionAppender.getOptions("/foo/one/two/bar", "put");
+        assertThat(options.isPresent()).isTrue();
+        assertThat(options.get()).isEqualTo(Collections.emptyList());
     }
 }
