@@ -71,7 +71,41 @@ public class RestCli {
         }
     }
 
-    public record RestCliSpec(@NonNull CommandSpec commandSpec, @NonNull OpenAPI openAPI) { // TODO: Hide constructor and fields.
+    /**
+     * Specification of RestCli.
+     * Create it by {@link #createRestCliSpec(String)}.
+     * <p>
+     * This class is immutable.
+     * Reuse the object as much as possible.
+     */
+    public static class RestCliSpec {
+        // `delombok` by lombok-maven-plugin does not work with Java 21 now. So, I use the old style for generating appropriate javadoc.
+        // `record` is not good for RestCliSpec because it must be a public class, but it should have private accessors.
+        private final CommandSpec commandSpec;
+        private final OpenAPI openAPI;
+
+        private RestCliSpec(@NonNull CommandSpec commandSpec, @NonNull OpenAPI openAPI) {
+            this.commandSpec = commandSpec;
+            this.openAPI = openAPI;
+        }
+
+        public int hashCode() {
+            return Objects.hash(commandSpec, openAPI);
+        }
+
+        public String toString() {
+            return "RestCli.RestCliSpec(commandSpec=" + this.commandSpec + ", openAPI=" + this.openAPI + ")";
+        }
+
+        public boolean equals(final Object o) {
+            if (o == this) return true;
+            if (!(o instanceof RestCliSpec)) return false;
+
+            RestCliSpec other = (RestCliSpec) o;
+
+            return Objects.equals(commandSpec, other.commandSpec) &&
+                    Objects.equals(openAPI, other.openAPI);
+        }
     }
 
     private final CommandLine commandLine;
