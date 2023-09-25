@@ -52,13 +52,17 @@ public class RestCli {
         /**
          * No authorization.
          */
-        public record None() implements Authorization {
+        record None() implements Authorization {
         }
 
         /**
          * Authorization header in HTTP request header.
+         * <p>
+         * Token example: {@literal Authorization authorization = new Authorization.AuthorizationHeader("token 1234567890abcdef1234567890abcdef12345678");}
+         * <p></p>
+         * Bearer example: {@literal Authorization authorization = new Authorization.AuthorizationHeader("Bearer 1234567890abcdef1234567890abcdef12345678");}
          */
-        public record AuthorizationHeader(@NonNull String authorizationHeader) implements Authorization {
+        record AuthorizationHeader(@NonNull String authorizationHeader) implements Authorization {
         }
 
         /**
@@ -66,7 +70,7 @@ public class RestCli {
          * <p>
          * example: <pre>{@literal https://username:password@host/path}</pre>
          */
-        public record UsernameAndPasswordInUriAuthority(@NonNull String username,
+        record UsernameAndPasswordInUriAuthority(@NonNull String username,
                                                         @NonNull String password) implements Authorization {
         }
     }
@@ -203,7 +207,7 @@ public class RestCli {
          * If multiple paths are specified, print warning message and use the last path.
          */
         if (pathCommands.size() > 1) {
-            log.debug("Multiple paths specified. The last path is used.");
+            log.warn("Multiple paths specified. The last path is used.");
         }
 
         CommandLine.ParseResult pathCommand = pathCommands.get(pathCommands.size() - 1);
@@ -221,7 +225,7 @@ public class RestCli {
          * If multiple operations are specified, print warning message and use the last operation.
          */
         if (methodCommands.size() > 1) {
-            log.debug("Multiple operations specified. The last operation is used.");
+            log.warn("Multiple operations specified. The last operation is used.");
         }
 
         CommandLine.ParseResult methodCommand = methodCommands.get(methodCommands.size() - 1);

@@ -94,7 +94,7 @@ public class RestCliTest {
             return;
         }
 
-        RestCli.Authorization.AuthorizationHeader authorizationHeader = new RestCli.Authorization.AuthorizationHeader(authorizationHeaderString);
+        RestCli.Authorization authorizationHeader = new RestCli.Authorization.AuthorizationHeader(authorizationHeaderString);
         RestCli.execute(REST_CLI_SPEC, authorizationHeader, "/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi", "--repo=flist");
     }
 

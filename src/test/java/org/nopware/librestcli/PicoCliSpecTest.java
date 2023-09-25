@@ -48,7 +48,7 @@ public class PicoCliSpecTest {
      * {@link picocli.CommandLine.ParseResult#matchedOptionValue(String, Object)}.
      */
     @Test
-    public void testOptionalOptionValue() {
+    public void testOptionWithDefaultValue() {
         OptionSpec optionWithOptionalValue = OptionSpec.builder("--option-with-default-value-and-allowed-zero-arity")
                 .arity("0..1")
                 .description("Option with default value and allowd 0 arity.")
@@ -65,7 +65,7 @@ public class PicoCliSpecTest {
         CommandLine commandLine = new CommandLine(commandSpec);
         commandLine.setExecutionStrategy(parseResult -> {
             String optionValue = parseResult.matchedOptionValue(optionWithOptionalValue.longestName(),
-                    "This default value is not used even when the arity is 0. I is used only when the option is not specified.");
+                    "This default value is not used even when the arity is 0. It is used only when the option is not specified.");
             optionalValueHolder.set(optionValue);
             return 0;
         });
@@ -80,7 +80,7 @@ public class PicoCliSpecTest {
 
         // Case: The option is not specified.
         commandLine.execute();
-        assertThat(optionalValueHolder.get()).isEqualTo("This default value is not used even when the arity is 0. I is used only when the option is not specified.");
+        assertThat(optionalValueHolder.get()).isEqualTo("This default value is not used even when the arity is 0. It is used only when the option is not specified.");
     }
 
     /**
