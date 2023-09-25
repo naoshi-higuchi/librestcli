@@ -112,14 +112,14 @@ public class PicoCliSpecTest {
      */
     @Test
     public void testIfCommandSpecIsImmutable() throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", OpenAPI.class);
+        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", String.class, OpenAPI.class);
         method.setAccessible(true);
 
         ParseOptions parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
         SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(GITHUB_API_SPEC, null, parseOptions);
         OpenAPI openAPI = swaggerParseResult.getOpenAPI();
-        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, openAPI);
+        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, "librestcli", openAPI);
 
         CommandLine commandLine = new CommandLine(commandSpec);
         long hash = commandLine.hashCode();

@@ -1,5 +1,7 @@
 package org.nopware.librestcli;
 
+import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
 import com.google.common.io.Resources;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.parser.OpenAPIV3Parser;
@@ -16,6 +18,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -32,7 +36,7 @@ public class RestCliTest {
             long begin = System.currentTimeMillis();
             GITHUB_API_SPEC = Resources.toString(
                     Resources.getResource("api.github.com.json"), Charset.defaultCharset());
-            REST_CLI_SPEC = RestCli.createRestCliSpec(GITHUB_API_SPEC);
+            REST_CLI_SPEC = RestCli.createRestCliSpec("restcli", GITHUB_API_SPEC);
             long end = System.currentTimeMillis();
             log.debug("Parsing the GitHub API took {} ms.", end - begin);
         } catch (IOException e) {
@@ -103,7 +107,7 @@ public class RestCliTest {
      */
     @Test
     public void measureCreateCommandSpecTime() throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", OpenAPI.class);
+        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", String.class, OpenAPI.class);
         method.setAccessible(true);
 
         ParseOptions parseOptions = new ParseOptions();
@@ -112,7 +116,7 @@ public class RestCliTest {
         OpenAPI openAPI = swaggerParseResult.getOpenAPI();
 
         long begin = System.currentTimeMillis();
-        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, openAPI);
+        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, "librestcli", openAPI);
         long end = System.currentTimeMillis();
 
         System.out.println(commandSpec.name());
@@ -126,14 +130,14 @@ public class RestCliTest {
      */
     @Test
     public void measureConstructCommandLineTime() throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", OpenAPI.class);
+        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", String.class, OpenAPI.class);
         method.setAccessible(true);
 
         ParseOptions parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
         SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(GITHUB_API_SPEC, null, parseOptions);
         OpenAPI openAPI = swaggerParseResult.getOpenAPI();
-        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, openAPI);
+        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, "librestcli", openAPI);
 
         long begin = System.currentTimeMillis();
         CommandLine commandLine = new CommandLine(commandSpec);
@@ -142,5 +146,55 @@ public class RestCliTest {
         commandLine.printVersionHelp(System.out);
 
         System.out.printf("Constructing CommandLine took %d ms.%n", end - begin);
+    }
+
+    /**
+     * Test if the command fails when a required path parameter is missing.
+     * <p>
+     * All path parameters are required.
+     */
+    @Test
+    public void testMissingPathParameter() {
+        // path parameter {owner} and {repo} are required, but {repo} is missing.
+        int exit = RestCli.execute(REST_CLI_SPEC, "/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi");
+        assertThat(exit).isNotZero();
+    }
+
+    @Test
+    public void testPathMatcher() {
+        assertThat(RestCli.PathMatcher.all().matches("/foo")).isTrue();
+
+        assertThat(RestCli.PathMatcher.string("/foo").matches("/foo")).isTrue();
+        assertThat(RestCli.PathMatcher.string("/foo").matches("/bar")).isFalse();
+
+        assertThat(RestCli.PathMatcher.glob("/repos/**").matches("/repos/{owner}/{repo}/issues")).isTrue();
+        assertThat(RestCli.PathMatcher.glob("/repos/**").matches("/repos")).isFalse();
+        assertThat(RestCli.PathMatcher.glob("/repos/*/*/issues").matches("/repos/{owner}/{repo}/issues")).isTrue();
+        assertThat(RestCli.PathMatcher.glob("/repos/*/issues").matches("/repos/{owner}/{repo}/issues")).isFalse();
+
+        assertThat(RestCli.PathMatcher.regex("/repos/[^/]+/[^/]+/issues").matches("/repos/{owner}/{repo}/issues")).isTrue();
+
+        assertThat(RestCli.PathMatcher.custom(path -> path.startsWith("/repos/")).matches("/repos/{owner}/{repo}/issues")).isTrue();
+        assertThat(RestCli.PathMatcher.custom(path -> path.length() == 42).matches("/repos/{owner}/{repo}/issues")).isFalse();
+
+        assertThat(RestCli.PathMatcher.all().except(RestCli.PathMatcher.string("/login")).matches("/login")).isFalse();
+    }
+
+    @Test
+    public void testOptionAppender() {
+        RestCli.OptionAppender optionAppender = new RestCli.OptionAppender(
+                RestCli.PathMatcher.glob("/foo/*/*/bar"),
+                Sets.newHashSet("put", "post", "delete"),
+                (path, operation) -> Lists.newArrayList("--X-API-KEY=secret", "--force"));
+
+        Optional<List<String>> options = optionAppender.getOptions("/foo/one/two/bar", "put");
+        assertThat(options.isPresent()).isTrue();
+        assertThat(options.get()).isEqualTo(Lists.newArrayList("--X-API-KEY=secret", "--force"));
+
+        Optional<List<String>> optionsPathUnmatched = optionAppender.getOptions("/foo/one/two/baz", "put");
+        assertThat(optionsPathUnmatched.isPresent()).isFalse();
+
+        Optional<List<String>> optionsOperationUnmatched = optionAppender.getOptions("/foo/one/two/bar", "get");
+        assertThat(optionsOperationUnmatched.isPresent()).isFalse();
     }
 }

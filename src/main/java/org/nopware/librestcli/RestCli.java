@@ -26,6 +26,7 @@ import picocli.CommandLine.Model.OptionSpec;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -34,10 +35,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.Charset;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -46,9 +50,9 @@ import java.util.stream.Collectors;
 @Slf4j
 public class RestCli {
     /**
-     * It is just a marker interface for Authorization classes.
+     * Authorization.
      */
-    public sealed interface Authorization permits None, Authorization.AuthorizationHeader, Authorization.UsernameAndPasswordInUriAuthority {
+    public sealed interface Authorization permits Authorization.None, Authorization.AuthorizationHeader, Authorization.UsernameAndPasswordInUriAuthority {
         /**
          * No authorization.
          */
@@ -77,7 +81,7 @@ public class RestCli {
 
     /**
      * Specification of RestCli.
-     * Create it by {@link #createRestCliSpec(String)}.
+     * Create it by {@link #createRestCliSpec(String, String)}.
      * <p>
      * This class is immutable.
      * Reuse the object as much as possible.
@@ -112,6 +116,190 @@ public class RestCli {
         }
     }
 
+    /**
+     * PathMatcher.
+     * <p>
+     *     PathMatcher is used to customize the behavior of RestCli.
+     *     For example, you can specify the path to which the option is applied.
+     *     <p>
+     *         PathMatcher is applied to the path before the path parameters are resolved.
+     *         For example, if the path is {@literal /repos/{owner}/{repo}/issues}, PathMatcher is applied to {@literal /repos/{owner}/{repo}/issues}, not to {@literal /repos/naoshi-higuchi/librestcli/issues}.
+     */
+    public sealed interface PathMatcher permits PathMatcher.AllMatcher, PathMatcher.StringMatcher, PathMatcher.GlobMatcher, PathMatcher.RegexMatcher, PathMatcher.MatcherWithException, PathMatcher.CustomMatcher {
+        boolean matches(@NonNull String path);
+
+        /**
+         * Match all paths.
+         * @return
+         */
+        static PathMatcher all() {
+            return new AllMatcher();
+        }
+
+        /**
+         * Match the specified path.
+         * @param path
+         * @return
+         */
+        static PathMatcher string(@NonNull String path) {
+            return new StringMatcher(path);
+        }
+
+        /**
+         * Match by glob pattern.
+         * @param globPattern
+         * @return
+         */
+        static PathMatcher glob(@NonNull String globPattern) {
+            return new GlobMatcher(globPattern);
+        }
+
+        /**
+         * Match by regular expression.
+         * @param regex
+         * @return
+         */
+        static PathMatcher regex(@NonNull String regex) {
+            return new RegexMatcher(regex);
+        }
+
+        /**
+         * Match by custom predicate.
+         * @param pathPredicate
+         * @return
+         */
+        static PathMatcher custom(@NonNull Predicate<String> pathPredicate) {
+            return new CustomMatcher(pathPredicate);
+        }
+
+        /**
+         * Specify exception. For example: {@literal PathMatcher.all().except(PathMatcher.string("/login"))} matches all paths except {@literal /login}.
+         * @param exceptionPathMatcher
+         * @return
+         */
+        default PathMatcher except(@NonNull PathMatcher exceptionPathMatcher) {
+            return new MatcherWithException(this, exceptionPathMatcher);
+        }
+
+        /**
+         * PathMatcher matches all paths.
+         */
+        final class AllMatcher implements PathMatcher {
+            @Override
+            public boolean matches(@NonNull String path) {
+                return true; // Always true.
+            }
+        }
+
+        /**
+         * PathMatcher matches the specified path.
+         */
+        record StringMatcher(@NonNull String path) implements PathMatcher {
+            @Override
+            public boolean matches(@NonNull String path) {
+                return this.path.equals(path);
+            }
+        }
+
+        /**
+         * PathMatcher by glob pattern.
+         * <p>
+         *     It uses {@link java.nio.file.FileSystem#getPathMatcher(String)}.
+         */
+        final class GlobMatcher implements PathMatcher {
+            private final java.nio.file.PathMatcher pathMatcher;
+
+            public GlobMatcher(String globPattern) {
+                this.pathMatcher = FileSystems.getDefault().getPathMatcher(String.format("glob:%s", globPattern)); // It may not work on Windows.
+            }
+
+            @Override
+            public boolean matches(@NonNull String path) {
+                return this.pathMatcher.matches(Paths.get(path));
+            }
+        }
+
+        /**
+         * PathMatcher by regular expression.
+         * <p>
+         *     It uses {@link java.util.regex.Pattern}.
+         */
+        final class RegexMatcher implements PathMatcher {
+            private final Pattern pattern;
+
+            public RegexMatcher(String regex) {
+                this.pattern = Pattern.compile(regex);
+            }
+
+            @Override
+            public boolean matches(@NonNull String path) {
+                return this.pattern.matcher(path).matches();
+            }
+        }
+
+        /**
+         * PathMatcher with exception.
+         * <p>
+         *     It matches the path if the path matches {@code pathMatcher} and does not match {@code exceptionPathMatcher}.
+         */
+        final class MatcherWithException implements PathMatcher {
+            private final PathMatcher pathMatcher;
+            private final PathMatcher exceptionPathMatcher;
+
+            public MatcherWithException(@NonNull PathMatcher pathMatcher, @NonNull PathMatcher exceptionPathMatcher) {
+                this.pathMatcher = pathMatcher;
+                this.exceptionPathMatcher = exceptionPathMatcher;
+            }
+
+            @Override
+            public boolean matches(@NonNull String path) {
+                return pathMatcher.matches(path) && !exceptionPathMatcher.matches(path);
+            }
+        }
+
+        /**
+         * PathMatcher by custom predicate.
+         */
+        final class CustomMatcher implements PathMatcher {
+            private final Predicate<String> pathPredicate;
+
+            public CustomMatcher(@NonNull Predicate<String> pathPredicate) {
+                this.pathPredicate = pathPredicate;
+            }
+            @Override
+            public boolean matches(@NonNull String path) {
+                return this.pathPredicate.test(path);
+            }
+        }
+    }
+
+    public static class OptionAppender {
+        private final PathMatcher pathMatcher;
+        private final Set<String> operations;
+        private final BiFunction<String, String, List<String>> optionMapper;
+
+        /**
+         * Create OptionAppender.
+         *
+         * @param pathMatcher  PathMatcher object.
+         * @param operations   Set of operations. operation is one of get, head, post, put, delete, options, trace, patch.
+         * @param optionMapper Function to map path and operation to option strings. return-value example: ["--my-option=myValue", "-p", "8080"].
+         */
+        public OptionAppender(@NonNull PathMatcher pathMatcher, @NonNull Set<String> operations, @NonNull BiFunction<String, String, List<String>> optionMapper) {
+            this.pathMatcher = pathMatcher;
+            this.operations = operations;
+            this.optionMapper = optionMapper;
+        }
+
+        Optional<List<String>> getOptions(String path, String operation) {
+            if (pathMatcher.matches(path) && operations.contains(operation)) {
+                return Optional.of(optionMapper.apply(path, operation));
+            } else {
+                return Optional.empty();
+            }
+        }
+    }
+
     private final CommandLine commandLine;
     private final OpenAPI openAPI;
     private final Authorization authorization;
@@ -129,6 +317,15 @@ public class RestCli {
         this.authorization = authorization;
     }
 
+    private RestCli(@NonNull RestCliSpec restCliSpec, @NonNull Authorization authorization, PrintWriter commandLineOut, PrintWriter commandLineErr) {
+        this.commandLine = new CommandLine(restCliSpec.commandSpec);
+        this.commandLine.setExecutionStrategy(this::doExecute);
+        this.commandLine.setOut(commandLineOut);
+        this.commandLine.setErr(commandLineErr);
+        this.openAPI = restCliSpec.openAPI;
+        this.authorization = authorization;
+    }
+
     private int generateBashAutoCompletionScript(CommandLine.ParseResult parseResult) {
         String bash = AutoComplete.bash(parseResult.commandSpec().name(), this.commandLine);
 
@@ -141,7 +338,7 @@ public class RestCli {
                 writer.flush();
             } catch (IOException e) {
                 System.err.println(e.getMessage());
-                return -1;
+                return 1;
             }
         }
         return 0;
@@ -154,7 +351,7 @@ public class RestCli {
     /**
      * Execute the command.
      *
-     * @param restCliSpec   {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String)}.
+     * @param restCliSpec   {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String, String)}.
      * @param authorization Authorization object.
      * @param args          Command line arguments.
      * @return Exit code.
@@ -164,11 +361,16 @@ public class RestCli {
         return restCli.execute(args);
     }
 
+    public static int execute(RestCliSpec restCliSpec, Authorization authorization, PrintWriter commandLineOut, PrintWriter commandLineErr, String... args) {
+        RestCli restCli = new RestCli(restCliSpec, authorization, commandLineOut, commandLineErr);
+        return restCli.execute(args);
+    }
+
     /**
      * Execute the command without authorization.
      * It is same as {@link #execute(RestCliSpec, Authorization, String...)} with {@link RestCli.Authorization.None}.
      *
-     * @param restCliSpec {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String)}.
+     * @param restCliSpec {@link RestCliSpec} object. Created by {@link #createRestCliSpec(String, String)}.
      * @param args        Command line arguments.
      * @return Exit code.
      */
@@ -200,7 +402,7 @@ public class RestCli {
         List<CommandLine.ParseResult> pathCommands = parseResult.subcommands();
         if (pathCommands.isEmpty()) {
             System.err.println("No path specified.");
-            return -1;
+            return 1;
         }
 
         /*
@@ -218,7 +420,7 @@ public class RestCli {
         List<CommandLine.ParseResult> methodCommands = pathCommand.subcommands();
         if (methodCommands.isEmpty()) {
             System.err.println("No method specified.");
-            return -1;
+            return 1;
         }
 
         /*
@@ -271,7 +473,7 @@ public class RestCli {
                 System.out.println(send.body());
             } catch (IOException | InterruptedException e) {
                 System.err.println(e.getMessage());
-                return -1;
+                return 1;
             }
         }
 
@@ -315,20 +517,13 @@ public class RestCli {
         Pattern pathParamPattern = Pattern.compile("\\{([^}]+)}");
         Matcher pathParamMatcher = pathParamPattern.matcher(path);
 
-        List<String> notProvidedPathParameters = new LinkedList<>();
-
         boolean providedAllPathParameters = pathParamMatcher.results().allMatch((matchResult) -> {
             String paramName = matchResult.group(1);
             Optional<String> paramValue = parameterValue(methodCommand, paramName, "path");
-            if (paramValue.isEmpty()) {
-                notProvidedPathParameters.add(paramName);
-            }
             return paramValue.isPresent();
         });
 
-        if (!providedAllPathParameters) {
-            throw new RuntimeException(String.format("Not provided path parameters: %s", notProvidedPathParameters));
-        }
+        assert(providedAllPathParameters); // All path parameters are required. so, `providedAllPathParameters` must be true.
 
         String resolvedPath = pathParamMatcher.replaceAll((matchResult) -> {
             String paramName = matchResult.group(1);
@@ -385,19 +580,18 @@ public class RestCli {
     /**
      * Create top level {@link CommandSpec} object and create nested sub-command & sub-sub-command objects.
      *
+     * @param commandName Command name.
      * @param openAPI OpenAPI specification.
      * @return {@link CommandSpec} object.
      */
-    private static CommandSpec createCommandSpec(OpenAPI openAPI) {
+    private static CommandSpec createCommandSpec(String commandName, OpenAPI openAPI) {
         CommandSpec spec = CommandSpec.create();
-        Properties properties = loadProperties();
 
         /*
          * Set the name and version of the command.
-         * The name is the value of the property "commandName" in librestcli.properties. It is defined in pom.xml.
          * The version is the value of the field "version" in the OpenAPI specification.
          */
-        spec.name(properties.getProperty("commandName"));
+        spec.name(commandName);
         spec.version(openAPI.getInfo().getVersion());
 
         spec.mixinStandardHelpOptions(true);
@@ -428,28 +622,10 @@ public class RestCli {
      * @param openApiJsonOrYaml OpenAPI specification in JSON or YAML format.
      * @return {@link RestCliSpec} object.
      */
-    public static RestCliSpec createRestCliSpec(String openApiJsonOrYaml) {
+    public static RestCliSpec createRestCliSpec(String commandName, String openApiJsonOrYaml) {
         OpenAPI openApi = parseOpenApi(openApiJsonOrYaml);
-        CommandSpec commandSpec = createCommandSpec(openApi);
+        CommandSpec commandSpec = createCommandSpec(commandName, openApi);
         return new RestCliSpec(commandSpec, openApi);
-    }
-
-    /**
-     * Load librestcli.properties that is generated by Maven from pom.xml.
-     *
-     * @return
-     */
-    private static Properties loadProperties() {
-        URL librestcliPropertiesUrl = Resources.getResource("librestcli.properties");
-        CharSource charSource = Resources.asCharSource(librestcliPropertiesUrl, Charset.defaultCharset());
-        try {
-            Properties properties = new Properties();
-            properties.load(charSource.openStream());
-            return properties;
-        } catch (IOException never) {
-            // The property file is generated by Maven automatically and is always available.
-            throw new RuntimeException(never);
-        }
     }
 
     /**
@@ -529,6 +705,7 @@ public class RestCli {
         methodSpec.name(method)
                 .usageMessage().description(operation.getSummary());
 
+        // name -> location -> parameter. location is one of "path", "query", "header", "cookie".
         Map<String, Map<String, Parameter>> parameters = parameters(pathItem, operation);
         parameters.forEach((name, locatedParameters) -> {
             // If there are multiple parameters with same name but different location, the option name is like "--name-in-path" and "--name-in-query".
@@ -542,7 +719,7 @@ public class RestCli {
 
                 OptionSpec.Builder optionSpecBuilder = OptionSpec.builder(optionName)
                         .description(parameter.getDescription())
-                        .required(parameter.getRequired());
+                        .required(parameter.getRequired() || "path".equals(location));
 
                 Optional<Schema> optionalSchema = Optional.ofNullable(parameter.getSchema());
                 optionalSchema.ifPresent(schema -> {
