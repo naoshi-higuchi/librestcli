@@ -1,22 +1,19 @@
 package org.nopware.librestcli;
 
-import org.junit.jupiter.api.Test;
-
 import com.google.common.io.Resources;
-
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Model.OptionSpec;
 
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.nio.charset.Charset;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -111,21 +108,68 @@ public class PicoCliSpecTest {
      * This test should be dependent only on picocli, but this test uses RestCli because constructing very big command-spec is too tedious other than by RestCli :-)
      */
     @Test
-    public void testIfCommandSpecIsImmutable() throws NoSuchMethodException, InvocationTargetException, IllegalAccessException {
-        Method method = RestCli.class.getDeclaredMethod("createCommandSpec", String.class, OpenAPI.class);
-        method.setAccessible(true);
+    public void testIfCommandSpecIsImmutable() {
+        RestCli.RestCliSpec restCliSpec = RestCli.createRestCliSpec("librestcli", GITHUB_API_SPEC);
 
-        ParseOptions parseOptions = new ParseOptions();
-        parseOptions.setResolve(true);
-        SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(GITHUB_API_SPEC, null, parseOptions);
-        OpenAPI openAPI = swaggerParseResult.getOpenAPI();
-        CommandSpec commandSpec = (CommandSpec) method.invoke(RestCli.class, "librestcli", openAPI);
+        long hash = restCliSpec.hashCode(); // Objects.hash(commandSpec, openAPI);
+
+        int get = RestCli.execute(restCliSpec, "/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi", "--repo=flist");
+        assertThat(get).isZero();
+
+        assertThat(restCliSpec.hashCode()).isEqualTo(hash); // test that it is immutable.
+    }
+
+    @Test
+    public void testMutuallyExclusiveNonRequiredOptionSpec() {
+        OptionSpec optionSpecA = OptionSpec.builder("-a")
+                .arity("0")
+                .description("Option A")
+                .required(false)
+                .type(String.class)
+                .build();
+
+        OptionSpec optionSpecB = OptionSpec.builder("-b")
+                .arity("0")
+                .description("Option B")
+                .required(false)
+                .type(String.class)
+                .build();
+
+        CommandLine.Model.ArgGroupSpec argGroupSpec = CommandLine.Model.ArgGroupSpec.builder()
+                .exclusive(true)
+                .addArg(optionSpecA)
+                .addArg(optionSpecB)
+                .build();
+
+        CommandSpec commandSpec = CommandSpec.create();
+        commandSpec.addArgGroup(argGroupSpec);
+
+        AtomicBoolean isOptionASpecified = new AtomicBoolean(false);
+        AtomicBoolean isOptionBSpecified = new AtomicBoolean(false);
 
         CommandLine commandLine = new CommandLine(commandSpec);
-        long hash = commandLine.hashCode();
+        commandLine.setExecutionStrategy(parseResult -> {
+            isOptionASpecified.set(parseResult.hasMatchedOption(optionSpecA));
+            isOptionBSpecified.set(parseResult.hasMatchedOption(optionSpecB));
+            return 0;
+        });
 
-        commandLine.execute("/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi", "--repo=flist");
+        // Case: Only Option A is specified.
+        commandLine.execute("-a");
+        assertThat(isOptionASpecified.get()).isTrue();
+        assertThat(isOptionBSpecified.get()).isFalse();
 
-        assertThat(commandLine.hashCode()).isEqualTo(hash);
+        // Case: Only Option B is specified.
+        commandLine.execute("-b");
+        assertThat(isOptionASpecified.get()).isFalse();
+        assertThat(isOptionBSpecified.get()).isTrue();
+
+        // Case: Neither Option A nor Option B is specified. They are not required, so it is OK.
+        commandLine.execute();
+        assertThat(isOptionASpecified.get()).isFalse();
+        assertThat(isOptionBSpecified.get()).isFalse();
+
+        // Case: Both Option A and Option B are specified. They are mutually exclusive, so it is NG.
+        assertThat(commandLine.execute("-a", "-b")).isNotZero();
     }
 }
