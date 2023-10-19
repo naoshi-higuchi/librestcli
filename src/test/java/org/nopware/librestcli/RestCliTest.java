@@ -47,7 +47,8 @@ public class RestCliTest {
 
     @Test
     public void test() throws IOException {
-        RestCli.execute(REST_CLI_SPEC, "/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi", "--repo=flist");
+        int get = RestCli.execute(REST_CLI_SPEC, "/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi", "--repo=flist");
+        assertThat(get).isZero();
     }
 
     @Test
@@ -214,5 +215,14 @@ public class RestCliTest {
         Optional<List<String>> options = optionAppender.getOptions("/foo/one/two/bar", "put");
         assertThat(options.isPresent()).isTrue();
         assertThat(options.get()).isEqualTo(Collections.emptyList());
+    }
+
+    @Test
+    public void testFileOutputOption(@TempDir Path tempDir) {
+        Path outputFile = tempDir.resolve("output");
+        int get = RestCli.execute(REST_CLI_SPEC, "--output-file", outputFile.toString(), "/repos/{owner}/{repo}/issues", "get", "--owner=naoshi-higuchi", "--repo=flist");
+        assertThat(get).isZero();
+        assertThat(outputFile).exists();
+        assertThat(outputFile).isNotEmptyFile(); // I should check the content, but it is not definite.
     }
 }

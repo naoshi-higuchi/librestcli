@@ -22,9 +22,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Model.OptionSpec;
 
-import java.io.BufferedWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.*;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -36,7 +34,6 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
-import java.util.function.BiFunction;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -339,8 +336,36 @@ public class RestCli {
     private final OpenAPI openAPI;
     private final Authorization authorization;
     private static final OptionSpec generateBashAutoCompletionScriptOption = OptionSpec.builder("--generate-bash-auto-completion-script")
+            .required(false)
             .arity("0..1")
             .description("Generate Bash auto completion script and exit.")
+            .paramLabel("file")
+            .type(String.class)
+            .build();
+
+    private static final OptionSpec stdinOptionSpec = OptionSpec.builder("--stdin")
+            .required(false)
+            .arity("0")
+            .description("Read request body from stdin.")
+            .type(String.class)
+            .build();
+    private static final OptionSpec inputFileOptionSpec = OptionSpec.builder("--input-file")
+            .required(false)
+            .arity("1")
+            .description("Input file. If not specified, the request body is empty.")
+            .paramLabel("file")
+            .type(String.class)
+            .build();
+
+    private static final CommandLine.Model.ArgGroupSpec requestBodyArgGroupSpec = CommandLine.Model.ArgGroupSpec.builder()
+            .exclusive(true)
+            .addArg(stdinOptionSpec)
+            .addArg(inputFileOptionSpec)
+            .build();
+    private static final OptionSpec outputFileOptionSpec = OptionSpec.builder("--output-file")
+            .required(false)
+            .arity("1")
+            .description("Output file. If not specified, the response is printed to stdout.")
             .paramLabel("file")
             .type(String.class)
             .build();
@@ -467,10 +492,25 @@ public class RestCli {
 
         CommandLine.ParseResult methodCommand = methodCommands.get(methodCommands.size() - 1);
 
-        return doRestRequest(parseResult, pathCommand, methodCommand);
+        try {
+            return doRestRequest(parseResult, pathCommand, methodCommand);
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    private int doRestRequest(CommandLine.ParseResult topCommand, CommandLine.ParseResult pathCommand, CommandLine.ParseResult methodCommand) {
+    private HttpRequest.BodyPublisher bodyPublisher(CommandLine.ParseResult methodCommand) throws FileNotFoundException {
+                String inputFilePath = methodCommand.matchedOptionValue(inputFileOptionSpec.longestName(), (String) null); // No default value.
+                if (inputFilePath != null) {
+                    return HttpRequest.BodyPublishers.ofFile(Paths.get(inputFilePath));
+                } else if (methodCommand.hasMatchedOption(stdinOptionSpec)) {
+                    return HttpRequest.BodyPublishers.ofInputStream(() -> System.in);
+                } else {
+                    return HttpRequest.BodyPublishers.noBody();
+                }
+    }
+
+    private int doRestRequest(CommandLine.ParseResult topCommand, CommandLine.ParseResult pathCommand, CommandLine.ParseResult methodCommand) throws FileNotFoundException {
         HttpClient.Builder httpClientBuilder = HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_2) // Each request will attempt to upgrade to HTTP/2. If the upgrade fails, then the response will be handled using HTTP/1.1
                 .proxy(ProxySelector.getDefault()); // Use the system-wide proxy settings.
@@ -480,7 +520,7 @@ public class RestCli {
                     .uri(createUri(pathCommand, methodCommand))
                     .method(
                             methodCommand.commandSpec().name().toUpperCase(), // Do not forget to convert to upper case. It is a pitfall about OpenAPI spec.
-                            HttpRequest.BodyPublishers.noBody()); // TODO: Support request body.
+                            bodyPublisher(methodCommand)); // TODO: Support request body.
 
             Multimap<String, String> resolvedHeaders = resolveHeaderParameters(pathCommand.commandSpec().name(), methodCommand.commandSpec().name(), methodCommand);
             resolvedHeaders.forEach(requestBuilder::header);
@@ -504,10 +544,17 @@ public class RestCli {
             log.info("Headers: {}", httpRequest.headers().map().toString());
 
             try {
-                HttpResponse<String> send = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString()); // TODO: Support response body other than String.
+                HttpResponse<InputStream> send = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
                 log.info("Response code: {}", send.statusCode());
                 log.info("ResponseHeaders: {}", send.headers().map().toString());
-                System.out.println(send.body());
+                try (InputStream bodyInputStream = send.body()) {
+                    String outputFile = topCommand.matchedOptionValue(outputFileOptionSpec.longestName(), (String) null); // No default value.
+                    if (outputFile != null) {
+                        Files.copy(bodyInputStream, Paths.get(outputFile));
+                    } else {
+                        bodyInputStream.transferTo(System.out);
+                    }
+                }
             } catch (IOException | InterruptedException e) {
                 System.err.println(e.getMessage());
                 return 1;
@@ -637,6 +684,9 @@ public class RestCli {
                 .description(openAPI.getInfo().getSummary());
 
         spec.addOption(generateBashAutoCompletionScriptOption);
+
+        spec.addArgGroup(requestBodyArgGroupSpec);
+        spec.addOption(outputFileOptionSpec);
 
         openAPI.getPaths().forEach((path, pathItem) -> {
             CommandSpec pathSpec = pathSpec(path, pathItem);
