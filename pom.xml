@@ -77,6 +77,41 @@
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
             <version>3.24.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Test Server -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <version>3.1.2</version>
+            <scope>test</scope>
+            <exclusions>
+                <!--
+                  Reason 1: It conflicts with slf4j-jdk14.
+                  Reason 2: It is not compatible with graalvm native-image.
+                -->
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+            <version>2.2.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!--
+          I need to install 3.0.2 explicitly.
+          If not, 2.0.2 is automatically installed by dependency, and following exception occurs: "java.lang.ClassNotFoundException: jakarta.validation.constraints.Min".
+          I don't know why :-(
+        -->
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+            <version>3.0.2</version>
         </dependency>
     </dependencies>
 
