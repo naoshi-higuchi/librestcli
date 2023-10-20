@@ -81,25 +81,6 @@ public class PicoCliSpecTest {
     }
 
     /**
-     * Measure the time to parse big OpenAPI document.
-     */
-    @Test
-    public void measureParsingTime() {
-        long begin = System.currentTimeMillis();
-
-        ParseOptions parseOptions = new ParseOptions();
-        parseOptions.setResolve(true);
-        SwaggerParseResult swaggerParseResult = new OpenAPIV3Parser().readContents(GITHUB_API_SPEC, null, parseOptions);
-        OpenAPI openAPI = swaggerParseResult.getOpenAPI();
-
-        long end = System.currentTimeMillis();
-
-        System.out.println(openAPI.getInfo().getSummary());
-
-        System.out.printf("Parsing the GitHub API took %d ms.%n", end - begin);
-    }
-
-    /**
      * Test if CommandSpec is immutable.
      * If it is immutable, we can reuse the same CommandSpec instance for multiple CommandLine instances.
      * Let's test its immutability by checking the hash code of CommandLine before and after executing a command.

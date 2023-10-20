@@ -52,9 +52,12 @@ public class RestCliTest {
     }
 
     @Test
-    public void testGenerateBashAutoCompletionScript() {
-        int exit = RestCli.execute(REST_CLI_SPEC, "--generate-bash-auto-completion-script");
+    public void testGenerateBashAutoCompletionScript(@TempDir Path tempDir) {
+        Path bashAutoCompletionScript = tempDir.resolve("bash-autocompletion.sh");
+        int exit = RestCli.execute(REST_CLI_SPEC, "--generate-bash-auto-completion-script=" + bashAutoCompletionScript);
         assertThat(exit).isZero();
+        assertThat(bashAutoCompletionScript).exists();
+        assertThat(bashAutoCompletionScript).isNotEmptyFile(); // I should check the content.
     }
 
     @Test

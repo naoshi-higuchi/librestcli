@@ -73,10 +73,13 @@ public class RestCli {
     }
 
     /**
-     * Specification of RestCli.
-     * Create it by {@link #createRestCliSpec(String, String)}.
+     * Specification of RestCli.<br>
+     * RestCliSpec object is created from specified OpenAPI specification, and defines the behavior of your rest client.
      * <p>
-     * This class is immutable.
+     * Create it by {@link #createRestCliSpec(String, String)}.<br>
+     * Use it by {@link #execute(RestCliSpec, String...)}.<br>
+     * <p>
+     * RestCliSpec object is immutable.
      * Reuse the object as much as possible.
      */
     public static class RestCliSpec {
@@ -343,6 +346,14 @@ public class RestCli {
             .type(String.class)
             .build();
 
+    private static final OptionSpec requestBodyOptionSpec = OptionSpec.builder("--request-body")
+            .required(false)
+            .arity("1")
+            .description("Request body.")
+            .paramLabel("body")
+            .type(String.class)
+            .build();
+
     private static final OptionSpec stdinOptionSpec = OptionSpec.builder("--stdin")
             .required(false)
             .arity("0")
@@ -359,6 +370,7 @@ public class RestCli {
 
     private static final CommandLine.Model.ArgGroupSpec requestBodyArgGroupSpec = CommandLine.Model.ArgGroupSpec.builder()
             .exclusive(true)
+            .addArg(requestBodyOptionSpec)
             .addArg(stdinOptionSpec)
             .addArg(inputFileOptionSpec)
             .build();
@@ -368,6 +380,15 @@ public class RestCli {
             .description("Output file. If not specified, the response is printed to stdout.")
             .paramLabel("file")
             .type(String.class)
+            .build();
+
+    private static final OptionSpec assertHttpStatusCodeSpec = OptionSpec.builder("--assert-http-status-code", "--sc")
+            .required(false)
+            .arity("1")
+            .description("Assert HTTP status code. If the status code is not equal to the specified value, exit with non-zero status code.")
+            .paramLabel("http-status-code")
+            .type(Integer.class)
+            .defaultValue("200")
             .build();
 
     private RestCli(@NonNull RestCliSpec restCliSpec, @NonNull Authorization authorization) {
@@ -500,14 +521,21 @@ public class RestCli {
     }
 
     private HttpRequest.BodyPublisher bodyPublisher(CommandLine.ParseResult methodCommand) throws FileNotFoundException {
-                String inputFilePath = methodCommand.matchedOptionValue(inputFileOptionSpec.longestName(), (String) null); // No default value.
-                if (inputFilePath != null) {
-                    return HttpRequest.BodyPublishers.ofFile(Paths.get(inputFilePath));
-                } else if (methodCommand.hasMatchedOption(stdinOptionSpec)) {
-                    return HttpRequest.BodyPublishers.ofInputStream(() -> System.in);
-                } else {
-                    return HttpRequest.BodyPublishers.noBody();
-                }
+        String requestBody = methodCommand.matchedOptionValue(requestBodyOptionSpec.longestName(), (String) null); // No default value.
+        if (requestBody != null) {
+            return HttpRequest.BodyPublishers.ofString(requestBody);
+        }
+
+        String inputFilePath = methodCommand.matchedOptionValue(inputFileOptionSpec.longestName(), (String) null); // No default value.
+        if (inputFilePath != null) {
+            return HttpRequest.BodyPublishers.ofFile(Paths.get(inputFilePath));
+        }
+
+        if (methodCommand.hasMatchedOption(stdinOptionSpec)) {
+            return HttpRequest.BodyPublishers.ofInputStream(() -> System.in);
+        }
+
+        return HttpRequest.BodyPublishers.noBody();
     }
 
     private int doRestRequest(CommandLine.ParseResult topCommand, CommandLine.ParseResult pathCommand, CommandLine.ParseResult methodCommand) throws FileNotFoundException {
@@ -515,12 +543,14 @@ public class RestCli {
                 .version(HttpClient.Version.HTTP_2) // Each request will attempt to upgrade to HTTP/2. If the upgrade fails, then the response will be handled using HTTP/1.1
                 .proxy(ProxySelector.getDefault()); // Use the system-wide proxy settings.
 
+        int exitCode = 0;
+
         try (HttpClient httpClient = httpClientBuilder.build()) {
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(createUri(pathCommand, methodCommand))
                     .method(
                             methodCommand.commandSpec().name().toUpperCase(), // Do not forget to convert to upper case. It is a pitfall about OpenAPI spec.
-                            bodyPublisher(methodCommand)); // TODO: Support request body.
+                            bodyPublisher(topCommand));
 
             Multimap<String, String> resolvedHeaders = resolveHeaderParameters(pathCommand.commandSpec().name(), methodCommand.commandSpec().name(), methodCommand);
             resolvedHeaders.forEach(requestBuilder::header);
@@ -534,8 +564,6 @@ public class RestCli {
             String userAgent = String.format("%s/%s", topCommand.commandSpec().name(), String.join(".", topCommand.commandSpec().version()));
 
             HttpRequest httpRequest = requestBuilder.header("User-Agent", userAgent)
-                    .header("Accept", "application/vnd.github+json")
-                    .header("X-GitHub-Api-Version", "2022-11-28")
                     .build();
 
             log.info("Request: {}", httpRequest.toString());
@@ -547,6 +575,15 @@ public class RestCli {
                 HttpResponse<InputStream> send = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
                 log.info("Response code: {}", send.statusCode());
                 log.info("ResponseHeaders: {}", send.headers().map().toString());
+
+                if (topCommand.hasMatchedOption(assertHttpStatusCodeSpec)) {
+                    Integer expectedStatusCode = topCommand.matchedOptionValue(assertHttpStatusCodeSpec.longestName(), (Integer) null);
+                    if (expectedStatusCode != null && expectedStatusCode != send.statusCode()) {
+                        log.info("Expected HTTP status code: {}, but got {}.", expectedStatusCode, send.statusCode());
+                        exitCode = 1; // Do not return here. Consume the response body.
+                    }
+                }
+
                 try (InputStream bodyInputStream = send.body()) {
                     String outputFile = topCommand.matchedOptionValue(outputFileOptionSpec.longestName(), (String) null); // No default value.
                     if (outputFile != null) {
@@ -561,7 +598,7 @@ public class RestCli {
             }
         }
 
-        return 0;
+        return exitCode;
     }
 
     /**
@@ -611,22 +648,34 @@ public class RestCli {
 
         String resolvedPath = pathParamMatcher.replaceAll((matchResult) -> {
             String paramName = matchResult.group(1);
-            return parameterValue(methodCommand, paramName, "path").get(); // The value is present because `providedAllPathParameters` is true.
+            return parameterValue(methodCommand, paramName, "path").map(Object::toString).get(); // The value is present because `providedAllPathParameters` is true.
         });
 
         return resolvedPath;
     }
 
-    private Optional<String> parameterValue(CommandLine.ParseResult operationCommand, String parameterName, String location) {
+    private <T> Optional<T> parameterValue(CommandLine.ParseResult operationCommand, String parameterName, String location) {
         String optionName = String.format("--%s", parameterName);
         String optionNameWithLocation = String.format("--%s-in-%s", parameterName, location);
-        return Optional.ofNullable(operationCommand.matchedOptionValue(optionName, (String) null))
-                .or(() -> Optional.ofNullable(operationCommand.matchedOptionValue(optionNameWithLocation, (String) null)));
+        return Optional.ofNullable(operationCommand.matchedOptionValue(optionName, (T) null))
+                .or(() -> Optional.ofNullable(operationCommand.matchedOptionValue(optionNameWithLocation, (T) null)));
+    }
+
+    /**
+     * Return empty list if the list is null.
+     * <p>
+     *     Some methods of Swagger parser return null instead of empty list.
+     * @param list
+     * @return
+     * @param <T>
+     */
+    private <T> List<T> toEmptyListIfNull(List<T> list) {
+        return list == null ? Collections.emptyList() : list;
     }
 
     private Optional<String> resolveQueryParameters(String path, String method, CommandLine.ParseResult methodCommand) {
         Operation operation = openAPI.getPaths().get(path).readOperationsMap().get(PathItem.HttpMethod.valueOf(method.toUpperCase()));
-        List<Parameter> queryParameters = operation.getParameters().stream()
+        List<Parameter> queryParameters = toEmptyListIfNull(operation.getParameters()).stream()
                 .filter(parameter -> parameter.getIn().equals("query"))
                 .toList();
         String resolvedQuery = queryParameters.stream().flatMap(parameter -> {
@@ -640,13 +689,13 @@ public class RestCli {
 
     private Multimap<String, String> resolveHeaderParameters(String path, String method, CommandLine.ParseResult methodCommand) {
         Operation operation = openAPI.getPaths().get(path).readOperationsMap().get(PathItem.HttpMethod.valueOf(method.toUpperCase()));
-        List<Parameter> headerParameters = operation.getParameters().stream()
+        List<Parameter> headerParameters = toEmptyListIfNull(operation.getParameters()).stream()
                 .filter(parameter -> parameter.getIn().equals("header"))
                 .toList();
         Multimap<String, String> resolvedHeaders = LinkedListMultimap.create();
         headerParameters.forEach(parameter -> {
             String parameterName = parameter.getName();
-            parameterValue(methodCommand, parameterName, "header").ifPresent(value -> resolvedHeaders.put(parameterName, value));
+            parameterValue(methodCommand, parameterName, "header").map(Object::toString).ifPresent(value -> resolvedHeaders.put(parameterName, value));
         });
         return Multimaps.unmodifiableMultimap(resolvedHeaders);
     }
@@ -688,6 +737,8 @@ public class RestCli {
         spec.addArgGroup(requestBodyArgGroupSpec);
         spec.addOption(outputFileOptionSpec);
 
+        spec.addOption(assertHttpStatusCodeSpec);
+
         openAPI.getPaths().forEach((path, pathItem) -> {
             CommandSpec pathSpec = pathSpec(path, pathItem);
             methodSpecs(pathItem).forEach(methodSpec -> {
@@ -703,7 +754,7 @@ public class RestCli {
     /**
      * Create {@link RestCliSpec} from OpenAPI specification.
      * <p>
-     * This method is heavy. It may take about 1 second to parse very big API specification.
+     * <strong>This method is heavy.</strong> It may take about 1 second to parse very big API specification.
      * Reuse the returned {@link RestCliSpec} object as much as possible.
      *
      * @param openApiJsonOrYaml OpenAPI specification in JSON or YAML format.
@@ -734,6 +785,11 @@ public class RestCli {
 
     private static Set<CommandSpec> methodSpecs(PathItem pathItem) {
         Set<CommandSpec> methodSpecs = new HashSet<>();
+
+        /*
+         * Oops, I can't scan all operation objects of PathItem by loop.
+         * Because PathItem does NOT have a method like `getOperation(Method method)`.
+         */
 
         Operation get = pathItem.getGet();
         if (get != null) {
