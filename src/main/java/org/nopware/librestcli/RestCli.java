@@ -786,50 +786,9 @@ public class RestCli {
     private static Set<CommandSpec> methodSpecs(PathItem pathItem) {
         Set<CommandSpec> methodSpecs = new HashSet<>();
 
-        /*
-         * Oops, I can't scan all operation objects of PathItem by loop.
-         * Because PathItem does NOT have a method like `getOperation(Method method)`.
-         */
-
-        Operation get = pathItem.getGet();
-        if (get != null) {
-            methodSpecs.add(methodSpec("get", pathItem, get));
-        }
-
-        Operation head = pathItem.getHead();
-        if (head != null) {
-            methodSpecs.add(methodSpec("head", pathItem, head));
-        }
-
-        Operation post = pathItem.getPost();
-        if (post != null) {
-            methodSpecs.add(methodSpec("post", pathItem, post));
-        }
-
-        Operation put = pathItem.getPut();
-        if (put != null) {
-            methodSpecs.add(methodSpec("put", pathItem, put));
-        }
-
-        Operation delete = pathItem.getDelete();
-        if (delete != null) {
-            methodSpecs.add(methodSpec("delete", pathItem, delete));
-        }
-
-        Operation options = pathItem.getOptions();
-        if (options != null) {
-            methodSpecs.add(methodSpec("options", pathItem, options));
-        }
-
-        Operation trace = pathItem.getTrace();
-        if (trace != null) {
-            methodSpecs.add(methodSpec("trace", pathItem, trace));
-        }
-
-        Operation patch = pathItem.getPatch();
-        if (patch != null) {
-            methodSpecs.add(methodSpec("patch", pathItem, patch));
-        }
+        pathItem.readOperationsMap().forEach((method, operation) -> {
+            methodSpecs.add(methodSpec(method.toString().toLowerCase(), pathItem, operation));
+        });
 
         return methodSpecs;
     }
