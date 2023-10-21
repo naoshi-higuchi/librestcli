@@ -1,3 +1,3 @@
 #!/bin/sh -v
-cd ..
+cd $(dirname $0)/..
 mvn versions:use-latest-releases

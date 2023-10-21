@@ -1,3 +1,3 @@
 #!/bin/sh -v
-cd ..
-mvn clean install javadoc:javadoc jacoco:report
+cd $(dirname $0)/..
+mvn clean install site:site
