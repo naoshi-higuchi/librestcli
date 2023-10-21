@@ -287,7 +287,7 @@ public class RestCli {
          */
         public OptionAppender(@NonNull PathMatcher pathMatcher, @NonNull Set<String> operations, @NonNull OptionAppender.Appender appender) {
             this.pathMatcher = pathMatcher;
-            this.operations = operations;
+            this.operations = Set.copyOf(operations);
             this.appender = appender;
         }
 
@@ -320,7 +320,7 @@ public class RestCli {
          */
         public HeaderAppender(@NonNull PathMatcher pathMatcher, @NonNull Set<String> operations, @NonNull RestCli.HeaderAppender.Appender appender) {
             this.pathMatcher = pathMatcher;
-            this.operations = operations;
+            this.operations = Set.copyOf(operations);
             this.appender = appender;
         }
 
