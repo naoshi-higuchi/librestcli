@@ -19,8 +19,13 @@ import java.nio.file.Path;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Slf4j
-
-public class KvsTest {
+/**
+ * Test CRUD operations with local KVS server.
+ * <p>
+ *     This test focuses on POST, PUT, and DELETE methods.
+ *     These methods mutate the state of the server. So, we need local server that can be reset before each test.
+ */
+public class CRUDTest {
     private static Kvs kvs;
     private static RestCli.RestCliSpec restCliSpec;
 
