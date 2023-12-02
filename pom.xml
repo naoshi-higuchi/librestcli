@@ -97,7 +97,7 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- Of course, we need springdoc for getting OpenAPI document -->
+        <!-- We need springdoc for getting OpenAPI document -->
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
