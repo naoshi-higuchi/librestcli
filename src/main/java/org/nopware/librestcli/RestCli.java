@@ -121,7 +121,7 @@ public class RestCli {
      *         PathMatcher is applied to the path before the path parameters are resolved.
      *         For example, if the path is {@literal /repos/{owner}/{repo}/issues}, PathMatcher is applied to {@literal /repos/{owner}/{repo}/issues}, not to {@literal /repos/naoshi-higuchi/librestcli/issues}.
      */
-    public sealed interface PathMatcher permits PathMatcher.AllMatcher, PathMatcher.StringMatcher, PathMatcher.GlobMatcher, PathMatcher.RegexMatcher, PathMatcher.MatcherWithException, PathMatcher.CustomMatcher {
+    public sealed interface PathMatcher permits PathMatchers.AllMatcher, PathMatchers.StringMatcher, PathMatchers.GlobMatcher, PathMatchers.RegexMatcher, PathMatchers.MatcherWithException, PathMatchers.CustomMatcher {
         boolean matches(@NonNull String path);
 
         /**
@@ -129,7 +129,7 @@ public class RestCli {
          * @return
          */
         static PathMatcher all() {
-            return new AllMatcher();
+            return new PathMatchers.AllMatcher();
         }
 
         /**
@@ -138,7 +138,7 @@ public class RestCli {
          * @return
          */
         static PathMatcher string(@NonNull String path) {
-            return new StringMatcher(path);
+            return new PathMatchers.StringMatcher(path);
         }
 
         /**
@@ -147,7 +147,7 @@ public class RestCli {
          * @return
          */
         static PathMatcher glob(@NonNull String globPattern) {
-            return new GlobMatcher(globPattern);
+            return new PathMatchers.GlobMatcher(globPattern);
         }
 
         /**
@@ -156,7 +156,7 @@ public class RestCli {
          * @return
          */
         static PathMatcher regex(@NonNull String regex) {
-            return new RegexMatcher(regex);
+            return new PathMatchers.RegexMatcher(regex);
         }
 
         /**
@@ -165,7 +165,7 @@ public class RestCli {
          * @return
          */
         static PathMatcher custom(@NonNull Predicate<String> pathPredicate) {
-            return new CustomMatcher(pathPredicate);
+            return new PathMatchers.CustomMatcher(pathPredicate);
         }
 
         /**
@@ -174,98 +174,7 @@ public class RestCli {
          * @return
          */
         default PathMatcher except(@NonNull PathMatcher exceptionPathMatcher) {
-            return new MatcherWithException(this, exceptionPathMatcher);
-        }
-
-        /**
-         * PathMatcher matches all paths.
-         */
-        final class AllMatcher implements PathMatcher {
-            @Override
-            public boolean matches(@NonNull String path) {
-                return true; // Always true.
-            }
-        }
-
-        /**
-         * PathMatcher matches the specified path.
-         */
-        record StringMatcher(@NonNull String path) implements PathMatcher {
-            @Override
-            public boolean matches(@NonNull String path) {
-                return this.path.equals(path);
-            }
-        }
-
-        /**
-         * PathMatcher by glob pattern.
-         * <p>
-         *     It uses {@link java.nio.file.FileSystem#getPathMatcher(String)}.
-         */
-        final class GlobMatcher implements PathMatcher {
-            private final java.nio.file.PathMatcher pathMatcher;
-
-            public GlobMatcher(String globPattern) {
-                this.pathMatcher = FileSystems.getDefault().getPathMatcher(String.format("glob:%s", globPattern)); // It may not work on Windows.
-            }
-
-            @Override
-            public boolean matches(@NonNull String path) {
-                return this.pathMatcher.matches(Paths.get(path));
-            }
-        }
-
-        /**
-         * PathMatcher by regular expression.
-         * <p>
-         *     It uses {@link java.util.regex.Pattern}.
-         */
-        final class RegexMatcher implements PathMatcher {
-            private final Pattern pattern;
-
-            public RegexMatcher(String regex) {
-                this.pattern = Pattern.compile(regex);
-            }
-
-            @Override
-            public boolean matches(@NonNull String path) {
-                return this.pattern.matcher(path).matches();
-            }
-        }
-
-        /**
-         * PathMatcher with exception.
-         * <p>
-         *     It matches the path if the path matches {@code pathMatcher} and does not match {@code exceptionPathMatcher}.
-         */
-        final class MatcherWithException implements PathMatcher {
-            private final PathMatcher pathMatcher;
-            private final PathMatcher exceptionPathMatcher;
-
-            public MatcherWithException(@NonNull PathMatcher pathMatcher, @NonNull PathMatcher exceptionPathMatcher) {
-                this.pathMatcher = pathMatcher;
-                this.exceptionPathMatcher = exceptionPathMatcher;
-            }
-
-            @Override
-            public boolean matches(@NonNull String path) {
-                return pathMatcher.matches(path) && !exceptionPathMatcher.matches(path);
-            }
-        }
-
-        /**
-         * PathMatcher by custom predicate.
-         */
-        final class CustomMatcher implements PathMatcher {
-            private final Predicate<String> pathPredicate;
-
-            public CustomMatcher(@NonNull Predicate<String> pathPredicate) {
-                this.pathPredicate = pathPredicate;
-            }
-            @Override
-            public boolean matches(@NonNull String path) {
-                return this.pathPredicate.test(path);
-            }
+            return new PathMatchers.MatcherWithException(this, exceptionPathMatcher);
         }
     }
 
