@@ -247,6 +247,10 @@ public class RestCli {
     private final CommandLine commandLine;
     private final OpenAPI openAPI;
     private final Authorization authorization;
+
+    private final List<OptionAppender> optionAppenders;
+
+    private final List<HeaderAppender> headerAppenders;
     private static final OptionSpec generateBashAutoCompletionScriptOption = OptionSpec.builder("--generate-bash-auto-completion-script")
             .required(false)
             .arity("0..1")
@@ -300,20 +304,61 @@ public class RestCli {
             .defaultValue("200")
             .build();
 
-    private RestCli(@NonNull RestCliSpec restCliSpec, @NonNull Authorization authorization) {
-        this.commandLine = new CommandLine(restCliSpec.commandSpec);
-        this.commandLine.setExecutionStrategy(this::doExecute);
-        this.openAPI = restCliSpec.openAPI;
-        this.authorization = authorization;
+    public static class Builder {
+        RestCliSpec restCliSpec;
+        PrintWriter commandLineOut;
+        PrintWriter commandLineErr;
+        Authorization authorization;
+        List<OptionAppender> optionAppenders = new LinkedList<>();
+        List<HeaderAppender> headerAppenders = new LinkedList<>();
+
+        public Builder(@NonNull RestCliSpec restCliSpec) {
+            this.restCliSpec = restCliSpec;
+        }
+
+        public Builder commandLineOut(@NonNull PrintWriter commandLineOut) {
+            this.commandLineOut = commandLineOut;
+            return this;
+        }
+
+        public Builder commandLineErr(@NonNull PrintWriter commandLineErr) {
+            this.commandLineErr = commandLineErr;
+            return this;
+        }
+
+        public Builder authorization(@NonNull Authorization authorization) {
+            this.authorization = authorization;
+            return this;
+        }
+
+        public Builder optionAppender(@NonNull OptionAppender optionAppender) {
+            this.optionAppenders.add(optionAppender);
+            return this;
+        }
+
+        public Builder headerAppender(@NonNull HeaderAppender headerAppender) {
+            this.headerAppenders.add(headerAppender);
+            return this;
+        }
+
+        public RestCli build() {
+            return new RestCli(restCliSpec, authorization, commandLineOut, commandLineErr, optionAppenders, headerAppenders);
+        }
     }
 
-    private RestCli(@NonNull RestCliSpec restCliSpec, @NonNull Authorization authorization, PrintWriter commandLineOut, PrintWriter commandLineErr) {
+    private RestCli(@NonNull RestCliSpec restCliSpec, @NonNull Authorization authorization, PrintWriter commandLineOut, PrintWriter commandLineErr, List<OptionAppender> optionAppenders, List<HeaderAppender> headerAppenders) {
         this.commandLine = new CommandLine(restCliSpec.commandSpec);
         this.commandLine.setExecutionStrategy(this::doExecute);
-        this.commandLine.setOut(commandLineOut);
-        this.commandLine.setErr(commandLineErr);
+        if (commandLineOut != null) {
+            this.commandLine.setOut(commandLineOut);
+        }
+        if (commandLineErr != null) {
+            this.commandLine.setErr(commandLineErr);
+        }
         this.openAPI = restCliSpec.openAPI;
         this.authorization = authorization;
+        this.optionAppenders = List.copyOf(optionAppenders);
+        this.headerAppenders = List.copyOf(headerAppenders);
     }
 
     private int generateBashAutoCompletionScript(CommandLine.ParseResult parseResult) {
@@ -347,12 +392,12 @@ public class RestCli {
      * @return Exit code.
      */
     public static int execute(RestCliSpec restCliSpec, Authorization authorization, String... args) {
-        RestCli restCli = new RestCli(restCliSpec, authorization);
+        RestCli restCli = new RestCli(restCliSpec, authorization, new PrintWriter(System.out), new PrintWriter(System.err), List.of(), List.of());
         return restCli.execute(args);
     }
 
     public static int execute(RestCliSpec restCliSpec, Authorization authorization, PrintWriter commandLineOut, PrintWriter commandLineErr, String... args) {
-        RestCli restCli = new RestCli(restCliSpec, authorization, commandLineOut, commandLineErr);
+        RestCli restCli = new RestCli(restCliSpec, authorization, commandLineOut, commandLineErr, List.of(), List.of());
         return restCli.execute(args);
     }
 
